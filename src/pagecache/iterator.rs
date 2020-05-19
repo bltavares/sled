@@ -85,7 +85,7 @@ impl Iterator for LogIter {
                 Ok(LogRead::Blob(header, _buf, blob_ptr, inline_len)) => {
                     trace!("read blob flush in LogIter::next");
                     let lsn = self.cur_lsn;
-                    self.cur_lsn += Lsn::from(inline_len);
+                    self.cur_lsn += Lsn::from(inline_len as isize);
 
                     return Some((
                         LogKind::from(header.kind),
@@ -101,7 +101,7 @@ impl Iterator for LogIter {
                         header,
                     );
                     let lsn = self.cur_lsn;
-                    self.cur_lsn += Lsn::from(inline_len);
+                    self.cur_lsn += Lsn::from(inline_len as isize);
 
                     return Some((
                         LogKind::from(header.kind),
@@ -115,13 +115,13 @@ impl Iterator for LogIter {
                     if last_lsn_in_batch > self.max_lsn {
                         return None;
                     } else {
-                        self.cur_lsn += Lsn::from(inline_len);
+                        self.cur_lsn += Lsn::from(inline_len  as isize);
                         continue;
                     }
                 }
                 Ok(LogRead::Canceled(inline_len)) => {
                     trace!("read zeroed in LogIter::next");
-                    self.cur_lsn += Lsn::from(inline_len);
+                    self.cur_lsn += Lsn::from(inline_len  as isize);
                 }
                 Ok(LogRead::Corrupted) => {
                     trace!(
@@ -142,7 +142,7 @@ impl Iterator for LogIter {
                          pointer at lsn {} ptr {}",
                         self.cur_lsn, blob_ptr
                     );
-                    self.cur_lsn += Lsn::from(inline_len);
+                    self.cur_lsn += Lsn::from(inline_len as isize);
                     continue;
                 }
                 Err(e) => {

@@ -1,5 +1,6 @@
 #![allow(clippy::mut_mut)]
 use std::{
+    collections::BTreeMap,
     convert::{TryFrom, TryInto},
     iter::FromIterator,
     marker::PhantomData,
@@ -73,7 +74,7 @@ impl Serialize for BatchManifest {
 
         let array = buf[..8].try_into().unwrap();
         *buf = &buf[8..];
-        Ok(BatchManifest(i64::from_le_bytes(array)))
+        Ok(BatchManifest(i64::from_le_bytes(array) as isize))
     }
 }
 
@@ -93,7 +94,7 @@ impl Serialize for MessageHeader {
     fn serialized_size(&self) -> u64 {
         1 + 4
             + self.segment_number.serialized_size()
-            + self.pid.serialized_size()
+            + (self.pid as u64).serialized_size()
             + self.len.serialized_size()
     }
 
@@ -103,7 +104,7 @@ impl Serialize for MessageHeader {
         self.kind.into().serialize_into(buf);
         self.len.serialize_into(buf);
         self.segment_number.serialize_into(buf);
-        self.pid.serialize_into(buf);
+        (self.pid as u64).serialize_into(buf);
     }
 
     fn deserialize(buf: &mut &[u8]) -> Result<MessageHeader> {
@@ -112,7 +113,7 @@ impl Serialize for MessageHeader {
             kind: u8::deserialize(buf)?.into(),
             len: u64::deserialize(buf)?,
             segment_number: SegmentNumber(u64::deserialize(buf)?),
-            pid: u64::deserialize(buf)?,
+            pid: u64::deserialize(buf)? as usize,
         })
     }
 }
@@ -321,17 +322,23 @@ impl Serialize for Meta {
             .map(|(k, v)| {
                 (k.len() as u64).serialized_size()
                     + u64::try_from(k.len()).unwrap()
-                    + v.serialized_size()
+                    + (*v as u64).serialized_size()
             })
             .sum()
     }
 
     fn serialize_into(&self, buf: &mut &mut [u8]) {
-        serialize_2tuple_sequence(self.inner.iter(), buf);
+        serialize_2tuple_sequence(
+            self.inner.iter().map(|z| (z.0, *z.1 as u64)),
+            buf,
+        );
     }
 
     fn deserialize(buf: &mut &[u8]) -> Result<Self> {
-        Ok(Meta { inner: deserialize_sequence(buf)? })
+        let inner: BTreeMap<IVec, u64> = deserialize_sequence(buf)?;
+        Ok(Meta {
+            inner: inner.into_iter().map(|z| (z.0, z.1 as usize)).collect(),
+        })
     }
 }
 
@@ -348,7 +355,7 @@ impl Serialize for Link {
                 1 + (key.len() as u64).serialized_size()
                     + u64::try_from(key.len()).unwrap()
             }
-            Link::ParentMergeIntention(a) => 1 + a.serialized_size(),
+            Link::ParentMergeIntention(a) => 1 + (*a as u64).serialized_size(),
             Link::ParentMergeConfirm | Link::ChildMergeCap => 1,
         }
     }
@@ -366,7 +373,7 @@ impl Serialize for Link {
             }
             Link::ParentMergeIntention(pid) => {
                 2_u8.serialize_into(buf);
-                pid.serialize_into(buf);
+                (*pid as u64).serialize_into(buf);
             }
             Link::ParentMergeConfirm => {
                 3_u8.serialize_into(buf);
@@ -386,7 +393,7 @@ impl Serialize for Link {
         Ok(match discriminant {
             0 => Link::Set(IVec::deserialize(buf)?, IVec::deserialize(buf)?),
             1 => Link::Del(IVec::deserialize(buf)?),
-            2 => Link::ParentMergeIntention(u64::deserialize(buf)?),
+            2 => Link::ParentMergeIntention(u64::deserialize(buf)? as usize),
             3 => Link::ParentMergeConfirm,
             4 => Link::ChildMergeCap,
             _ => return Err(Error::Corruption { at: DiskPtr::Inline(220) }),
@@ -396,9 +403,9 @@ impl Serialize for Link {
 
 impl Serialize for Node {
     fn serialized_size(&self) -> u64 {
-        let next_sz = self.next.unwrap_or(0_u64).serialized_size();
+        let next_sz = (self.next.unwrap_or(0) as u64).serialized_size();
         let merging_child_sz =
-            self.merging_child.unwrap_or(0_u64).serialized_size();
+            (self.merging_child.unwrap_or(0) as u64).serialized_size();
 
         2 + next_sz
             + merging_child_sz
@@ -408,8 +415,8 @@ impl Serialize for Node {
     }
 
     fn serialize_into(&self, buf: &mut &mut [u8]) {
-        self.next.unwrap_or(0_u64).serialize_into(buf);
-        self.merging_child.unwrap_or(0_u64).serialize_into(buf);
+        (self.next.unwrap_or(0) as u64).serialize_into(buf);
+        (self.merging_child.unwrap_or(0) as u64).serialize_into(buf);
         self.merging.serialize_into(buf);
         self.prefix_len.serialize_into(buf);
         self.lo.serialize_into(buf);
@@ -418,8 +425,8 @@ impl Serialize for Node {
     }
 
     fn deserialize(buf: &mut &[u8]) -> Result<Self> {
-        let next = u64::deserialize(buf)?;
-        let merging_child = u64::deserialize(buf)?;
+        let next = u64::deserialize(buf)? as usize;
+        let merging_child = u64::deserialize(buf)? as usize;
         Ok(Node {
             next: if next == 0 { None } else { Some(next) },
             merging_child: if merging_child == 0 {
@@ -438,9 +445,9 @@ impl Serialize for Node {
 
 impl Serialize for Snapshot {
     fn serialized_size(&self) -> u64 {
-        self.last_lsn.serialized_size()
+        (self.last_lsn as i64).serialized_size()
             + self.last_lid.serialized_size()
-            + self.max_header_stable_lsn.serialized_size()
+            + (self.max_header_stable_lsn as i64).serialized_size()
             + self
                 .pt
                 .iter()
@@ -449,9 +456,9 @@ impl Serialize for Snapshot {
     }
 
     fn serialize_into(&self, buf: &mut &mut [u8]) {
-        self.last_lsn.serialize_into(buf);
+        (self.last_lsn as i64).serialize_into(buf);
         self.last_lid.serialize_into(buf);
-        self.max_header_stable_lsn.serialize_into(buf);
+        (self.max_header_stable_lsn as i64).serialize_into(buf);
         for page_state in &self.pt {
             page_state.serialize_into(buf);
         }
@@ -459,9 +466,9 @@ impl Serialize for Snapshot {
 
     fn deserialize(buf: &mut &[u8]) -> Result<Self> {
         Ok(Snapshot {
-            last_lsn: { i64::deserialize(buf)? },
+            last_lsn: { i64::deserialize(buf)? as isize },
             last_lid: { u64::deserialize(buf)? },
-            max_header_stable_lsn: { i64::deserialize(buf)? },
+            max_header_stable_lsn: { i64::deserialize(buf)? as isize },
             pt: deserialize_sequence(buf)?,
         })
     }
@@ -496,7 +503,7 @@ impl Serialize for Data {
                         .map(|(idx, k)| {
                             let v = index.pointers[idx];
                             (k.len() as u64).serialized_size()
-                                + v.serialized_size()
+                                + (v as u64).serialized_size()
                                 + k.len() as u64
                         })
                         .sum::<u64>()
@@ -523,7 +530,7 @@ impl Serialize for Data {
                     key.serialize_into(buf);
                 }
                 for value in &index.pointers {
-                    value.serialize_into(buf);
+                    (*value as u64).serialize_into(buf);
                 }
             }
         }
@@ -541,10 +548,17 @@ impl Serialize for Data {
                 keys: deserialize_bounded_sequence(buf, len)?,
                 values: deserialize_bounded_sequence(buf, len)?,
             }),
-            1 => Data::Index(Index {
-                keys: deserialize_bounded_sequence(buf, len)?,
-                pointers: deserialize_bounded_sequence(buf, len)?,
-            }),
+            1 => {
+                let pointers: Vec<u64> =
+                    deserialize_bounded_sequence(buf, len)?;
+                Data::Index(Index {
+                    keys: deserialize_bounded_sequence(buf, len)?,
+                    pointers: pointers
+                        .into_iter()
+                        .map(|z| z as usize)
+                        .collect(),
+                })
+            }
             _ => return Err(Error::Corruption { at: DiskPtr::Inline(115) }),
         })
     }
@@ -555,7 +569,7 @@ impl Serialize for DiskPtr {
         match self {
             DiskPtr::Inline(a) => 1 + a.serialized_size(),
             DiskPtr::Blob(a, b) => {
-                1 + a.serialized_size() + b.serialized_size()
+                1 + a.serialized_size() + (*b as i64).serialized_size()
             }
         }
     }
@@ -569,7 +583,7 @@ impl Serialize for DiskPtr {
             DiskPtr::Blob(log_offset, blob_lsn) => {
                 1_u8.serialize_into(buf);
                 log_offset.serialize_into(buf);
-                blob_lsn.serialize_into(buf);
+                (*blob_lsn as i64).serialize_into(buf);
             }
         }
     }
@@ -582,7 +596,10 @@ impl Serialize for DiskPtr {
         *buf = &buf[1..];
         Ok(match discriminant {
             0 => DiskPtr::Inline(u64::deserialize(buf)?),
-            1 => DiskPtr::Blob(u64::deserialize(buf)?, i64::deserialize(buf)?),
+            1 => DiskPtr::Blob(
+                u64::deserialize(buf)?,
+                i64::deserialize(buf)? as isize,
+            ),
             _ => return Err(Error::Corruption { at: DiskPtr::Inline(666) }),
         })
     }
@@ -592,11 +609,12 @@ impl Serialize for PageState {
     fn serialized_size(&self) -> u64 {
         match self {
             PageState::Free(a, disk_ptr) => {
-                1 + a.serialized_size() + disk_ptr.serialized_size()
+                1 + (*a as i64).serialized_size() + disk_ptr.serialized_size()
             }
             PageState::Present(items) => {
                 1 + items
                     .iter()
+                    .map(|tuple| (tuple.0 as i64, tuple.1, tuple.2))
                     .map(|tuple| tuple.serialized_size())
                     .sum::<u64>()
             }
@@ -608,7 +626,7 @@ impl Serialize for PageState {
         match self {
             PageState::Free(lsn, disk_ptr) => {
                 0_u8.serialize_into(buf);
-                lsn.serialize_into(buf);
+                (*lsn as i64).serialize_into(buf);
                 disk_ptr.serialize_into(buf);
             }
             PageState::Present(items) => {
@@ -616,7 +634,10 @@ impl Serialize for PageState {
                 let items_len: u8 = u8::try_from(items.len())
                     .expect("should never have more than 255 frags");
                 items_len.serialize_into(buf);
-                serialize_3tuple_ref_sequence(items.iter(), buf);
+                serialize_3tuple_ref_sequence(
+                    items.iter().map(|z| (z.0 as i64, z.1, z.2)),
+                    buf,
+                );
             }
             _ => panic!("tried to serialize {:?}", self),
         }
@@ -630,13 +651,18 @@ impl Serialize for PageState {
         *buf = &buf[1..];
         Ok(match discriminant {
             0 => PageState::Free(
-                i64::deserialize(buf)?,
+                i64::deserialize(buf)? as isize,
                 DiskPtr::deserialize(buf)?,
             ),
             len => {
-                let items =
+                let items: Vec<(i64, DiskPtr, u64)> =
                     deserialize_bounded_sequence(buf, usize::from(len))?;
-                PageState::Present(items)
+                PageState::Present(
+                    items
+                        .into_iter()
+                        .map(|z| (z.0 as isize, z.1, z.2))
+                        .collect(),
+                )
             }
         })
     }
@@ -682,7 +708,7 @@ impl<A: Serialize, B: Serialize, C: Serialize> Serialize for (A, B, C) {
 
 fn serialize_2tuple_sequence<'a, XS, A, B>(xs: XS, buf: &mut &mut [u8])
 where
-    XS: Iterator<Item = (&'a A, &'a B)>,
+    XS: Iterator<Item = (&'a A, B)>,
     A: Serialize + 'a,
     B: Serialize + 'a,
 {
@@ -694,7 +720,7 @@ where
 
 fn serialize_3tuple_ref_sequence<'a, XS, A, B, C>(xs: XS, buf: &mut &mut [u8])
 where
-    XS: Iterator<Item = &'a (A, B, C)>,
+    XS: Iterator<Item = (A, B, C)>,
     A: Serialize + 'a,
     B: Serialize + 'a,
     C: Serialize + 'a,
@@ -830,10 +856,10 @@ mod qc {
 
     impl Arbitrary for Node {
         fn arbitrary<G: Gen>(g: &mut G) -> Node {
-            let next_raw: Option<u64> = Arbitrary::arbitrary(g);
+            let next_raw: Option<usize> = Arbitrary::arbitrary(g);
             let next = next_raw.map(|v| std::cmp::max(v, 1));
 
-            let merging_child_raw: Option<u64> = Arbitrary::arbitrary(g);
+            let merging_child_raw: Option<usize> = Arbitrary::arbitrary(g);
             let merging_child = merging_child_raw.map(|v| std::cmp::max(v, 1));
 
             Node {
@@ -873,7 +899,7 @@ mod qc {
             match discriminant {
                 0 => Link::Set(IVec::arbitrary(g), IVec::arbitrary(g)),
                 1 => Link::Del(IVec::arbitrary(g)),
-                2 => Link::ParentMergeIntention(u64::arbitrary(g)),
+                2 => Link::ParentMergeIntention(u64::arbitrary(g) as usize),
                 3 => Link::ParentMergeConfirm,
                 4 => Link::ChildMergeCap,
                 _ => panic!("invalid choice"),

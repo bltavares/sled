@@ -331,7 +331,7 @@ use {
         io::{Read, Write},
         sync::{
             atomic::{
-                AtomicI64 as AtomicLsn, AtomicU64, AtomicUsize,
+                AtomicIsize as AtomicLsn, AtomicUsize,
                 Ordering::{Acquire, Relaxed, Release, SeqCst},
             },
             Arc,

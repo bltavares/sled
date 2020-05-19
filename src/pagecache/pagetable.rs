@@ -23,9 +23,9 @@ pub const PAGETABLE_NODE_SZ: usize = size_of::<Node1>();
 const NODE2_FAN_FACTOR: usize = 18;
 const NODE1_FAN_OUT: usize = 1 << (MAX_PID_BITS - NODE2_FAN_FACTOR);
 const NODE2_FAN_OUT: usize = 1 << NODE2_FAN_FACTOR;
-const FAN_MASK: u64 = (NODE2_FAN_OUT - 1) as u64;
+const FAN_MASK: usize = NODE2_FAN_OUT - 1;
 
-pub type PageId = u64;
+pub type PageId = usize;
 
 struct Node1 {
     children: [Atomic<Node2>; NODE1_FAN_OUT],

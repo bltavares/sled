@@ -3,7 +3,7 @@ use std::{
     fmt::{self, Debug},
     ops::{self, Deref, RangeBounds},
     sync::{
-        atomic::{AtomicU64, Ordering::SeqCst},
+        atomic::{AtomicUsize, Ordering::SeqCst},
         Arc,
     },
 };
@@ -80,7 +80,7 @@ pub struct TreeInner {
     pub(crate) tree_id: IVec,
     pub(crate) context: Context,
     pub(crate) subscribers: Subscribers,
-    pub(crate) root: AtomicU64,
+    pub(crate) root: AtomicUsize,
     pub(crate) concurrency_control: ConcurrencyControl,
     pub(crate) merge_operator: RwLock<Option<Box<dyn MergeOperator>>>,
 }
@@ -1622,7 +1622,7 @@ impl Tree {
         }
 
         for _ in 0..MAX_LOOPS {
-            if cursor == u64::max_value() {
+            if cursor == usize::max_value() {
                 // this collection has been explicitly removed
                 return Err(Error::CollectionNotFound(self.tree_id.clone()));
             }

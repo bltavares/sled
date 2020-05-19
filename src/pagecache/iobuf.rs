@@ -11,7 +11,7 @@ use crate::{pagecache::*, *};
 // for writers in the IO buffer header.
 pub(in crate::pagecache) const MAX_WRITERS: Header = 127;
 
-pub(in crate::pagecache) type Header = u64;
+pub(in crate::pagecache) type Header = usize;
 
 macro_rules! io_fail {
     ($self:expr, $e:expr) => {
@@ -63,7 +63,7 @@ impl Drop for AlignedBuf {
 
 pub(crate) struct IoBuf {
     buf: Arc<UnsafeCell<AlignedBuf>>,
-    header: CachePadded<AtomicU64>,
+    header: CachePadded<AtomicUsize>,
     base: usize,
     pub offset: LogOffset,
     pub lsn: Lsn,
@@ -293,7 +293,7 @@ impl IoBufs {
                 };
 
                 (
-                    snapshot_last_lsn + Lsn::from(width),
+                    snapshot_last_lsn + Lsn::from(width as isize),
                     snapshot_last_lid + LogOffset::from(width),
                 )
             };
@@ -327,7 +327,7 @@ impl IoBufs {
 
             let mut iobuf = IoBuf {
                 buf: Arc::new(UnsafeCell::new(AlignedBuf::new(segment_size))),
-                header: CachePadded::new(AtomicU64::new(0)),
+                header: CachePadded::new(AtomicUsize::new(0)),
                 base: 0,
                 offset: lid,
                 lsn: 0,
@@ -351,7 +351,7 @@ impl IoBufs {
 
             IoBuf {
                 buf: Arc::new(UnsafeCell::new(AlignedBuf::new(segment_size))),
-                header: CachePadded::new(AtomicU64::new(0)),
+                header: CachePadded::new(AtomicUsize::new(0)),
                 base,
                 offset: next_lid,
                 lsn: next_lsn,
@@ -526,7 +526,7 @@ impl IoBufs {
             write_blob(&self.config, header.kind, blob_id, item)?;
 
             let _ = Measure::new(&M.serialize);
-            blob_id.serialize_into(out_buf_ref);
+            (blob_id as i64).serialize_into(out_buf_ref);
         } else {
             let _ = Measure::new(&M.serialize);
             item.serialize_into(out_buf_ref);
@@ -1085,7 +1085,7 @@ pub(in crate::pagecache) fn maybe_seal_and_write_iobuf(
     let next_iobuf = if maxed {
         let mut next_iobuf = IoBuf {
             buf: Arc::new(UnsafeCell::new(AlignedBuf::new(segment_size))),
-            header: CachePadded::new(AtomicU64::new(0)),
+            header: CachePadded::new(AtomicUsize::new(0)),
             base: 0,
             offset: next_offset,
             lsn: next_lsn,
@@ -1107,7 +1107,7 @@ pub(in crate::pagecache) fn maybe_seal_and_write_iobuf(
         IoBuf {
             // reuse the previous io buffer
             buf: iobuf.buf.clone(),
-            header: CachePadded::new(AtomicU64::new(new_salt)),
+            header: CachePadded::new(AtomicUsize::new(new_salt)),
             base: iobuf.base + res_len,
             offset: next_offset,
             lsn: next_lsn,
@@ -1212,7 +1212,7 @@ pub(crate) const fn mk_sealed(v: Header) -> Header {
 }
 
 pub(crate) const fn n_writers(v: Header) -> Header {
-    v << 33 >> 57
+    ((v as u64) << 33 >> 57) as usize
 }
 
 #[inline]
@@ -1229,20 +1229,20 @@ pub(crate) fn decr_writers(v: Header) -> Header {
 
 #[inline]
 pub(crate) fn offset(v: Header) -> usize {
-    let ret = v << 40 >> 40;
+    let ret = (v as u64) << 40 >> 40;
     usize::try_from(ret).unwrap()
 }
 
 #[inline]
 pub(crate) fn bump_offset(v: Header, by: usize) -> Header {
-    assert_eq!(by >> 24, 0);
-    v + (by as Header)
+    assert_eq!((by as u64) >> 24, 0);
+    v + by
 }
 
 pub(crate) const fn bump_salt(v: Header) -> Header {
-    (v + (1 << 32)) & 0xFFFF_FFFF_0000_0000
+    ((v as u64 + (1 << 32)) & 0xFFFF_FFFF_0000_0000) as Header
 }
 
 pub(crate) const fn salt(v: Header) -> Header {
-    v >> 32 << 32
+    ((v as u64) >> 32 << 32) as usize
 }

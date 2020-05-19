@@ -99,7 +99,7 @@ impl Log {
         self.reserve_inner(
             LogKind::Replace,
             pid,
-            &blob_pointer,
+            &(blob_pointer as i64),
             Some(blob_pointer),
             guard,
         )
@@ -249,7 +249,7 @@ impl Log {
                 ),
                 pid,
                 len: if over_blob_threshold {
-                    reservation_lsn.serialized_size()
+                    (reservation_lsn as i64).serialized_size()
                 } else {
                     serialized_len
                 },
@@ -258,7 +258,7 @@ impl Log {
             let inline_buf_len = if over_blob_threshold {
                 usize::try_from(
                     message_header.serialized_size()
-                        + reservation_lsn.serialized_size(),
+                        + (reservation_lsn as i64).serialized_size(),
                 )
                 .unwrap()
             } else {
@@ -542,10 +542,11 @@ impl From<[u8; SEG_HEADER_LEN]> for SegmentHeader {
             let crc32_header =
                 arr_to_u32(buf.get_unchecked(0..4)) ^ 0xFFFF_FFFF;
 
-            let xor_lsn = arr_to_lsn(buf.get_unchecked(4..12));
+            let xor_lsn = arr_to_lsn(buf.get_unchecked(4..12)) as i64;
             let lsn = xor_lsn ^ 0x7FFF_FFFF_FFFF_FFFF;
 
-            let xor_max_stable_lsn = arr_to_lsn(buf.get_unchecked(12..20));
+            let xor_max_stable_lsn =
+                arr_to_lsn(buf.get_unchecked(12..20)) as i64;
             let max_stable_lsn = xor_max_stable_lsn ^ 0x7FFF_FFFF_FFFF_FFFF;
 
             let crc32_tested = crc32(&buf[4..20]);
@@ -560,7 +561,11 @@ impl From<[u8; SEG_HEADER_LEN]> for SegmentHeader {
                 );
             }
 
-            Self { lsn, max_stable_lsn, ok }
+            Self {
+                lsn: lsn as isize,
+                max_stable_lsn: max_stable_lsn as isize,
+                ok,
+            }
         }
     }
 }
@@ -569,11 +574,11 @@ impl Into<[u8; SEG_HEADER_LEN]> for SegmentHeader {
     fn into(self) -> [u8; SEG_HEADER_LEN] {
         let mut buf = [0; SEG_HEADER_LEN];
 
-        let xor_lsn = self.lsn ^ 0x7FFF_FFFF_FFFF_FFFF;
-        let lsn_arr = lsn_to_arr(xor_lsn);
+        let xor_lsn = self.lsn as i64 ^ 0x7FFF_FFFF_FFFF_FFFF ;
+        let lsn_arr = lsn_to_arr(xor_lsn as isize);
 
-        let xor_max_stable_lsn = self.max_stable_lsn ^ 0x7FFF_FFFF_FFFF_FFFF;
-        let highest_stable_lsn_arr = lsn_to_arr(xor_max_stable_lsn);
+        let xor_max_stable_lsn = self.max_stable_lsn as i64 ^ 0x7FFF_FFFF_FFFF_FFFF;
+        let highest_stable_lsn_arr = lsn_to_arr(xor_max_stable_lsn as isize);
 
         #[allow(unsafe_code)]
         unsafe {

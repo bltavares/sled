@@ -112,7 +112,7 @@ impl Db {
                 tree_id: id.clone(),
                 subscribers: Subscribers::default(),
                 context: context.clone(),
-                root: AtomicU64::new(root),
+                root: AtomicUsize::new(root),
                 concurrency_control: ConcurrencyControl::default(),
                 merge_operator: RwLock::new(None),
             }));
@@ -201,7 +201,7 @@ impl Db {
             }
         }
 
-        tree.root.store(u64::max_value(), SeqCst);
+        tree.root.store(usize::max_value(), SeqCst);
 
         // drop writer lock
         drop(tenants);

@@ -570,12 +570,12 @@ impl SegmentAccountant {
             match state {
                 PageState::Present(coords) => {
                     for (lsn, ptr, sz) in coords {
-                        add(pid as PageId, *lsn, *sz, ptr.lid(), &mut segments);
+                        add(pid, *lsn, *sz, ptr.lid(), &mut segments);
                     }
                 }
                 PageState::Free(lsn, ptr) => {
                     add(
-                        pid as PageId,
+                        pid,
                         *lsn,
                         u64::try_from(MAX_MSG_HEADER_LEN).unwrap(),
                         ptr.lid(),

@@ -2,7 +2,7 @@
 
 use std::convert::TryFrom;
 use std::ptr;
-use std::sync::atomic::{AtomicPtr, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 
 use crate::{
     debug_delay,
@@ -25,7 +25,7 @@ const N_SHARDS: usize = 256;
 
 struct AccessBlock {
     len: AtomicUsize,
-    block: [AtomicU64; MAX_QUEUE_ITEMS],
+    block: [AtomicUsize; MAX_QUEUE_ITEMS],
     next: AtomicPtr<AccessBlock>,
 }
 
@@ -33,7 +33,7 @@ impl Default for AccessBlock {
     fn default() -> AccessBlock {
         AccessBlock {
             len: AtomicUsize::new(0),
-            block: unsafe { std::mem::transmute([0_u64; MAX_QUEUE_ITEMS]) },
+            block: unsafe { std::mem::transmute([0_usize; MAX_QUEUE_ITEMS]) },
             next: AtomicPtr::default(),
         }
     }
@@ -182,22 +182,22 @@ impl<'a> Iterator for CacheAccessIter<'a> {
 }
 
 #[derive(Clone, Copy)]
-struct CacheAccess(u64);
+struct CacheAccess(usize);
 
 impl CacheAccess {
-    fn new(pid: PageId, sz: u64) -> CacheAccess {
+    fn new(pid: PageId, sz: usize) -> CacheAccess {
         let rounded_up_power_of_2 =
             u64::from(sz.next_power_of_two().trailing_zeros());
 
         assert!(rounded_up_power_of_2 < 256);
 
-        CacheAccess(pid | (rounded_up_power_of_2 << 56))
+        CacheAccess(pid | (rounded_up_power_of_2 << 56) as usize)
     }
 
     const fn decompose(self) -> (PageId, u64) {
-        let sz = 1 << (self.0 >> 56);
-        let pid = self.0 << 8 >> 8;
-        (pid, sz)
+        let sz = 1 << (self.0 as u64 >> 56);
+        let pid = (self.0 as u64) << 8 >> 8;
+        (pid as usize, sz)
     }
 }
 
@@ -238,11 +238,11 @@ impl Lru {
     pub(crate) fn accessed(
         &self,
         id: PageId,
-        item_size: u64,
+        item_size: usize,
         guard: &Guard,
     ) -> Vec<PageId> {
         let mut ret = vec![];
-        let shards = self.shards.len() as u64;
+        let shards = self.shards.len();
         let (shard_idx, item_pos) = (id % shards, id / shards);
         let (stack, shard_mu) = &self.shards[safe_usize(shard_idx)];
 

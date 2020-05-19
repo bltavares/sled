@@ -63,7 +63,7 @@ where
                     tree_id: name,
                     context: context.clone(),
                     subscribers: Subscribers::default(),
-                    root: AtomicU64::new(root_id),
+                    root: AtomicUsize::new(root_id),
                     concurrency_control: ConcurrencyControl::default(),
                     merge_operator: RwLock::new(None),
                 })));
@@ -115,7 +115,7 @@ where
             tree_id: name,
             subscribers: Subscribers::default(),
             context: context.clone(),
-            root: AtomicU64::new(root_id),
+            root: AtomicUsize::new(root_id),
             concurrency_control: ConcurrencyControl::default(),
             merge_operator: RwLock::new(None),
         })));

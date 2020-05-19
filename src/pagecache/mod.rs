@@ -73,10 +73,10 @@ pub type LogOffset = u64;
 pub type BlobPointer = Lsn;
 
 /// The logical sequence number of an item in the database log.
-pub type Lsn = i64;
+pub type Lsn = isize;
 
 /// A page identifier.
-pub type PageId = u64;
+pub type PageId = usize;
 
 /// Uses a non-varint `Lsn` to mark offsets.
 #[derive(Default, Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Debug)]
@@ -228,7 +228,14 @@ fn bump_atomic_lsn(atomic_lsn: &AtomicLsn, to: Lsn) {
 use std::convert::{TryFrom, TryInto};
 
 #[inline]
+#[cfg(not(target_arch="mips"))]
 pub(crate) fn lsn_to_arr(number: Lsn) -> [u8; 8] {
+    number.to_le_bytes()
+}
+
+#[inline]
+#[cfg(target_arch="mips")]
+pub(crate) fn lsn_to_arr(number: Lsn) -> [u8; 4] {
     number.to_le_bytes()
 }
 
@@ -471,13 +478,13 @@ impl Page {
 pub struct PageCache {
     pub(crate) config: RunningConfig,
     inner: PageTable,
-    next_pid_to_allocate: AtomicU64,
+    next_pid_to_allocate: AtomicUsize,
     free: Arc<Mutex<BinaryHeap<PageId>>>,
     #[doc(hidden)]
     pub log: Log,
     lru: Lru,
-    idgen: Arc<AtomicU64>,
-    idgen_persists: Arc<AtomicU64>,
+    idgen: Arc<AtomicUsize>,
+    idgen_persists: Arc<AtomicUsize>,
     idgen_persist_mu: Arc<Mutex<()>>,
     was_recovered: bool,
 }
@@ -558,13 +565,13 @@ impl PageCache {
         let mut pc = Self {
             config: config.clone(),
             inner: PageTable::default(),
-            next_pid_to_allocate: AtomicU64::new(0),
+            next_pid_to_allocate: AtomicUsize::new(0),
             free: Arc::new(Mutex::new(BinaryHeap::new())),
             log: Log::start(config, &snapshot)?,
             lru,
             idgen_persist_mu: Arc::new(Mutex::new(())),
-            idgen: Arc::new(AtomicU64::new(0)),
-            idgen_persists: Arc::new(AtomicU64::new(0)),
+            idgen: Arc::new(AtomicUsize::new(0)),
+            idgen_persists: Arc::new(AtomicUsize::new(0)),
             was_recovered: false,
         };
 
@@ -642,8 +649,8 @@ impl PageCache {
             let idgen_persists = counter / pc.config.idgen_persist_interval
                 * pc.config.idgen_persist_interval;
 
-            pc.idgen.store(idgen_recovery, Release);
-            pc.idgen_persists.store(idgen_persists, Release);
+            pc.idgen.store(idgen_recovery as usize, Release);
+            pc.idgen_persists.store(idgen_persists as usize, Release);
         }
 
         pc.was_recovered = was_recovered;
@@ -961,7 +968,7 @@ impl PageCache {
                     let total_page_size =
                         unsafe { new_shared.deref().log_size() };
                     let to_evict =
-                        self.lru.accessed(pid, total_page_size, guard);
+                        self.lru.accessed(pid, total_page_size as usize, guard);
                     trace!(
                         "accessed pid {} -> paging out pids {:?}",
                         pid,
@@ -1157,7 +1164,7 @@ impl PageCache {
                     let total_page_size =
                         unsafe { new_shared.deref().log_size() };
                     let to_evict =
-                        self.lru.accessed(pid, total_page_size, guard);
+                        self.lru.accessed(pid, total_page_size as usize, guard);
                     trace!(
                         "accessed pid {} -> paging out pids {:?}",
                         pid,
@@ -1382,7 +1389,7 @@ impl PageCache {
                     let total_page_size =
                         unsafe { new_shared.deref().log_size() };
                     let to_evict =
-                        self.lru.accessed(pid, total_page_size, guard);
+                        self.lru.accessed(pid, total_page_size as usize, guard);
                     trace!(
                         "accessed pid {} -> paging out pids {:?}",
                         pid,
@@ -1514,7 +1521,7 @@ impl PageCache {
         if page_view.update.is_some() {
             // possibly evict an item now that our cache has grown
             let total_page_size = page_view.log_size();
-            let to_evict = self.lru.accessed(pid, total_page_size, guard);
+            let to_evict = self.lru.accessed(pid, total_page_size as usize, guard);
             trace!("accessed pid {} -> paging out pids {:?}", pid, to_evict);
             if !to_evict.is_empty() {
                 self.page_out(to_evict, guard)?;
@@ -1565,7 +1572,7 @@ impl PageCache {
 
             // possibly evict an item now that our cache has grown
             let total_page_size = unsafe { new_shared.deref().log_size() };
-            let to_evict = self.lru.accessed(pid, total_page_size, guard);
+            let to_evict = self.lru.accessed(pid, total_page_size as usize, guard);
             trace!("accessed pid {} -> paging out pids {:?}", pid, to_evict);
             if !to_evict.is_empty() {
                 self.page_out(to_evict, guard)?;
@@ -1618,15 +1625,15 @@ impl PageCache {
     /// a blocking flush to fsync the latest counter, ensuring
     /// that we will never give out the same counter twice.
     pub(crate) fn generate_id(&self) -> Result<u64> {
-        let ret = self.idgen.fetch_add(1, Relaxed);
+        let ret = self.idgen.fetch_add(1, Relaxed) as u64;
 
         let interval = self.config.idgen_persist_interval;
         let necessary_persists = ret / interval * interval;
-        let mut persisted = self.idgen_persists.load(Acquire);
+        let mut persisted = self.idgen_persists.load(Acquire) as u64;
 
         while persisted < necessary_persists {
             let _mu = self.idgen_persist_mu.lock();
-            persisted = self.idgen_persists.load(Acquire);
+            persisted = self.idgen_persists.load(Acquire) as u64;
             if persisted < necessary_persists {
                 // it's our responsibility to persist up to our ID
                 let guard = pin();
@@ -1636,8 +1643,8 @@ impl PageCache {
 
                 let counter_update = Update::Counter(necessary_persists);
 
-                let old = self.idgen_persists.swap(necessary_persists, Release);
-                assert_eq!(old, persisted);
+                let old = self.idgen_persists.swap(necessary_persists as usize, Release);
+                assert_eq!(old as u64, persisted);
 
                 if self
                     .cas_page(
@@ -1875,9 +1882,9 @@ impl PageCache {
     }
 
     fn load_snapshot(&mut self, snapshot: &Snapshot) -> Result<()> {
-        let next_pid_to_allocate = snapshot.pt.len() as PageId;
+        let next_pid_to_allocate = snapshot.pt.len();
 
-        self.next_pid_to_allocate = AtomicU64::from(next_pid_to_allocate);
+        self.next_pid_to_allocate = AtomicUsize::from(next_pid_to_allocate);
 
         debug!("load_snapshot loading pages from 0..{}", next_pid_to_allocate);
         for pid in 0..next_pid_to_allocate {
